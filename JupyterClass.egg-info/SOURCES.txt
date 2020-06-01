@@ -1,0 +1,10 @@
+MANIFEST.in
+setup.py
+JupyterClass.egg-info/PKG-INFO
+JupyterClass.egg-info/SOURCES.txt
+JupyterClass.egg-info/dependency_links.txt
+JupyterClass.egg-info/not-zip-safe
+JupyterClass.egg-info/top_level.txt
+JupyterClass/static/index.js
+jupyter-config/jupyter_notebook_config.d/JupyterClass.json
+jupyter-config/nbconfig/notebook.d/JupyterClass.json
