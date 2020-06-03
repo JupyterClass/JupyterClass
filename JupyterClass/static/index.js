@@ -12,6 +12,76 @@ define([
   Jupyter,
 ) {
 
+  function load_ipython_extension() {
+    // TODO: Notebook metadata needs to store three of the following variables
+    //       to identify a student's attempt for a given question for a given practice
+
+    const {studentId, practiceId} = getJupyterClassInfo();
+
+    if (!studentId || !practiceId) {
+      // Not a JupyterClass notebook.
+      return;
+    }
+
+    console.log("🚀 Welcome to lesson " + practiceId + " " + studentId + "!");
+
+    addJupyterClassButtonToToolbar();
+
+    // Attach callback to all Practice Question code cells
+    let questionCells = getQuestionCells();
+
+    questionCells.forEach(questionCell => {
+      patch_CodeCell_get_callbacks(questionCell, postRunCellCallback);
+    });
+  }
+
+  function addJupyterClassButtonToToolbar() {
+
+    let handler = function () {
+      document.getElementById('jc-modal').style.display = 'flex'; // default is 'none'
+    };
+
+    const modal = `
+      <div id="jc-modal" style="display: none; position: fixed; top: 0; bottom: 0; left: 0; right: 0; height: 100%; width: 100%; background-color: rgba(0,0,0,0.7); z-index: 100; justify-content: center; align-items: center;" class="">
+        <div style="position: relative;">
+          <div id="jc-form" style="display: flex; flex-direction: column; background-color: white; min-width: 300px; min-height: 300px; border-radius: 4px; padding: 16px;">
+            <h1 style="font-size: 3em; margin-bottom: 16px;">
+              JupyterClass
+            </h1>
+            <code>Author: @elihuansen</code>
+            <input id="jc-student-name" style="margin: 16px 0 8px 0" class="form-control" placeholder="Student Full Name">
+            <input id="jc-secret" class="form-control" placeholder="Lesson Password">
+            <button class="btn btn-primary" style="width: 100%; margin-top: auto;">
+              SUBMIT
+            </button>
+          </div>
+          <span style="position: absolute; top: 5px; right: 5px; cursor: pointer;" 
+                onclick="document.getElementById('jc-modal').style.display = 'none';">
+            X
+          </span>
+        </div>
+      </div>
+    `.trim();
+    const body = document.getElementsByTagName('body')[0];
+    body.insertAdjacentHTML('beforeend', modal);
+
+    // Prevent key presses from calling jupyter notebook's keyboard shortcuts
+    document.getElementById('jc-student-name').onkeydown = function (e) { e.stopPropagation(); };
+    document.getElementById('jc-secret').onkeydown = function (e) { e.stopPropagation(); };
+
+    let action = {
+      icon: 'fa-graduation-cap', // a font-awesome class used on buttons, etc
+      help: 'Show JupyterClass modal',
+      help_index: 'zz',
+      handler
+    };
+    let prefix = 'JupyterClass';
+    let action_name = 'show-alert';
+
+    let full_action_name = Jupyter.actions.register(action, action_name, prefix); // returns 'my_extension:show-alert'
+    Jupyter.toolbar.add_buttons_group([full_action_name]);
+  }
+
   function similarity(s1, s2) {
     let longer = s1;
     let shorter = s2;
@@ -196,20 +266,6 @@ define([
       };
       return callbacks;
     };
-  }
-
-  function load_ipython_extension() {
-    // TODO: Notebook metadata needs to store three of the following variables
-    //       to identify a student's attempt for a given question for a given practice
-    const {studentId, practiceId} = getJupyterClassInfo();
-    console.log("Welcome to lesson " + practiceId + " " + studentId + "!");
-
-    // Attach callback to all Practice Question code cells
-    let questionCells = getQuestionCells();
-
-    questionCells.forEach(questionCell => {
-      patch_CodeCell_get_callbacks(questionCell, postRunCellCallback);
-    });
   }
 
   return {load_ipython_extension};
