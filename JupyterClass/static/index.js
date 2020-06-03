@@ -1,4 +1,5 @@
 const CONFIG = {
+  joinSessionEndpoint: 'http://localhost:3000/api/join',
   studentStatusEndpoint: 'https://hw-live-db.herokuapp.com/student/practice/status',
   studentAttemptEvalEndpoint: 'https://hw-live-db.herokuapp.com/student/practice/question/eval',
 
@@ -13,8 +14,6 @@ define([
 ) {
 
   function load_ipython_extension() {
-    // TODO: Notebook metadata needs to store three of the following variables
-    //       to identify a student's attempt for a given question for a given practice
 
     const {studentId, practiceId} = getJupyterClassInfo();
 
@@ -51,7 +50,7 @@ define([
             <code>Author: @elihuansen</code>
             <input id="jc-student-name" style="margin: 16px 0 8px 0" class="form-control" placeholder="Student Full Name">
             <input id="jc-secret" class="form-control" placeholder="Lesson Password">
-            <button class="btn btn-primary" style="width: 100%; margin-top: auto;">
+            <button id="jc-submit" class="btn btn-primary" style="width: 100%; margin-top: auto;">
               SUBMIT
             </button>
           </div>
@@ -65,9 +64,22 @@ define([
     const body = document.getElementsByTagName('body')[0];
     body.insertAdjacentHTML('beforeend', modal);
 
+    const studentNameInput = document.getElementById('jc-student-name');
+    const secretInput = document.getElementById('jc-secret');
+
     // Prevent key presses from calling jupyter notebook's keyboard shortcuts
-    document.getElementById('jc-student-name').onkeydown = function (e) { e.stopPropagation(); };
-    document.getElementById('jc-secret').onkeydown = function (e) { e.stopPropagation(); };
+    studentNameInput.onkeydown = function (e) { e.stopPropagation(); };
+    secretInput.onkeydown = function (e) { e.stopPropagation(); };
+    document.getElementById('jc-submit').onclick = function (e) {
+      const studentName = studentNameInput.value;
+      const secret = secretInput.value;
+
+      postData(CONFIG.joinSessionEndpoint, { studentId: studentName, secret })
+        .then(data => {
+          // TODO: Show success notification
+          console.log(data);
+        })
+    };
 
     let action = {
       icon: 'fa-graduation-cap', // a font-awesome class used on buttons, etc
