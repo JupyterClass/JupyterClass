@@ -3,4 +3,4 @@
 #            for the extension's code changes to take effect!
 jupyter nbextension install JupyterClass && \
 jupyter nbextension enable JupyterClass/static/index && \
-jupyter notebook ~/Desktop/Lesson\ 6C\ Datathon.ipynb;
+jupyter notebook notebook-examples;

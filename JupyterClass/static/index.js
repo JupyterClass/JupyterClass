@@ -1,8 +1,4 @@
 const CONFIG = {
-  joinSessionEndpoint: 'http://localhost:3000/api/join',
-  studentStatusEndpoint: 'https://hw-live-db.herokuapp.com/student/practice/status',
-  studentAttemptEvalEndpoint: 'https://hw-live-db.herokuapp.com/student/practice/question/eval',
-
   // If question output is deemed to be at least 50% "correct"
   correctnessThreshold: 0.5
 };
@@ -13,16 +9,31 @@ define([
   Jupyter,
 ) {
 
+  logger.log('Injecting JupyterClass code...');
+
+  let studentId = Jupyter.notebook.metadata.JupyterClass.studentId;
+  let practiceId = Jupyter.notebook.notebook_name;
+  let serverUrl = Jupyter.notebook.metadata.JupyterClass.server;
+  let token = Jupyter.notebook.metadata.JupyterClass.token;
+  let joinSessionEndpoint = serverUrl + '/api/join';
+  let studentAttemptEvalEndpoint = serverUrl + '/api/evaluate';
+
+  if (studentId && practiceId && serverUrl && token) {
+    logger.log('All session metadata present. Attempting connection to JupyterClass server...');
+    HELPERS.postData(joinSessionEndpoint, {studentId, practiceId, secret: token})
+      .then(data => {
+        // TODO: Show success notification
+        logger.log(data);
+      })
+  }
+
+  logger.log('Initialised with metadata:', { studentId, practiceId, serverUrl, token });
+
   function load_ipython_extension() {
-
-    const {studentId, practiceId} = getJupyterClassInfo();
-
-    if (!studentId || !practiceId) {
+    if (!practiceId) {
       // Not a JupyterClass notebook.
       return;
     }
-
-    console.log("🚀 Welcome to lesson " + practiceId + " " + studentId + "!");
 
     addJupyterClassButtonToToolbar();
 
@@ -32,9 +43,12 @@ define([
     questionCells.forEach(questionCell => {
       patch_CodeCell_get_callbacks(questionCell, postRunCellCallback);
     });
+
+    logger.log("Initialised - Practice ID: " + practiceId + "...");
   }
 
   function addJupyterClassButtonToToolbar() {
+    logger.log('Adding button to toolbar');
 
     let handler = function () {
       document.getElementById('jc-modal').style.display = 'flex'; // default is 'none'
@@ -48,7 +62,7 @@ define([
               JupyterClass
             </h1>
             <code>Author: @elihuansen</code>
-            <input id="jc-student-name" style="margin: 16px 0 8px 0" class="form-control" placeholder="Student Full Name">
+            <input id="jc-student-name" style="margin: 16px 0 8px 0" class="form-control" placeholder="Student Full Name" value="${studentId || ''}">
             <input id="jc-secret" class="form-control" placeholder="Lesson Password">
             <button id="jc-submit" class="btn btn-primary" style="width: 100%; margin-top: auto;">
               SUBMIT
@@ -74,10 +88,13 @@ define([
       const studentName = studentNameInput.value;
       const secret = secretInput.value;
 
-      postData(CONFIG.joinSessionEndpoint, { studentId: studentName, secret })
+      studentId = studentName;
+      Jupyter.notebook.metadata.JupyterClass.studentId = studentName;
+
+      HELPERS.postData(joinSessionEndpoint, { studentId, secret })
         .then(data => {
           // TODO: Show success notification
-          console.log(data);
+          logger.log(data);
         })
     };
 
@@ -94,108 +111,21 @@ define([
     Jupyter.toolbar.add_buttons_group([full_action_name]);
   }
 
-  function similarity(s1, s2) {
-    let longer = s1;
-    let shorter = s2;
-    if (s1.length < s2.length) {
-      longer = s2;
-      shorter = s1;
-    }
-    let longerLength = longer.length;
-    if (longerLength === 0) {
-      return 1.0;
-    }
-    return (longerLength - editDistance(longer, shorter)) / parseFloat(longerLength);
-  }
-
-  function editDistance(s1, s2) {
-    s1 = s1.toLowerCase();
-    s2 = s2.toLowerCase();
-
-    let costs = [];
-
-    for (let i = 0; i <= s1.length; i++) {
-      let lastValue = i;
-      for (let j = 0; j <= s2.length; j++) {
-        if (i === 0) {
-          costs[j] = j;
-        } else {
-          if (j > 0) {
-            let newValue = costs[j - 1];
-            if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
-              newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
-            }
-            costs[j - 1] = lastValue;
-            lastValue = newValue;
-          }
-        }
-      }
-      if (i > 0) {
-        costs[s2.length] = lastValue;
-      }
-    }
-    return costs[s2.length];
-  }
-
-  function postData(url = '', data = {}) {
-    // Default options are marked with *
-    return fetch(url, {
-      method: 'POST', // *GET, POST, PUT, DELETE, etc.
-      mode: 'cors', // no-cors, cors, *same-origin
-      cache: 'no-cache', // *default, no-cache, reload, force-cache, only-if-cached
-      credentials: 'same-origin', // include, *same-origin, omit
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      redirect: 'follow', // manual, *follow, error
-      referrer: 'no-referrer', // no-referrer, *client
-      body: JSON.stringify(data), // body data type must match "Content-Type" header
-    })
-      .then(response => response.json()); // parses JSON response into native JavaScript objects
-  }
-
-  function getJupyterClassInfo() {
-    return Jupyter.notebook.metadata.JupyterClass;
-  }
-
-  function getStudentPracticeInfo() {
-    const {studentId, practiceId} = getJupyterClassInfo();
-    return {studentId, practiceId};
-  }
-
-  function notifyStudentQuestionCorrect(questionId) {
-
-    const endpoint = CONFIG.studentStatusEndpoint;
-    const {studentId, practiceId} = getStudentPracticeInfo();
-
-    const requestBody = {
-      studentId, practiceId, questionId,
-      status: 'correct'
-    };
-    console.log(requestBody);
-    postData(endpoint, requestBody)
-      .then(console.log)
-      .catch(err => {
-        console.log(err);
-      });
-  }
-
   function apiEvalStudentAttempt({questionId, output}) {
-    const endpoint = CONFIG.studentAttemptEvalEndpoint;
-    const {studentId, practiceId} = getStudentPracticeInfo();
+    const endpoint = studentAttemptEvalEndpoint;
 
     const requestBody = {studentId, practiceId, questionId, output};
 
-    console.log(requestBody);
-    postData(endpoint, requestBody)
-      .then(console.log)
+    logger.log(requestBody);
+    HELPERS.postData(endpoint, requestBody)
+      .then(logger.log)
       .catch(err => {
-        console.log(err);
+        logger.error(err);
       });
   }
 
   function getCorrectnessScore(expectedOutput, actualOutput) {
-    return similarity(expectedOutput, actualOutput);
+    return HELPERS.similarity(expectedOutput, actualOutput);
   }
 
   function getQuestionCells() {
@@ -245,13 +175,15 @@ define([
       outputValue = output.text;
     }
 
+    logger.log('🐞', output);
+
     outputValue = cleanCellOutput(outputValue);
 
     correctnessScore = getCorrectnessScore(expectedOutput, outputValue);
-    console.log('Frontend evaluated correctness: 🎉', correctnessScore);
+    logger.log('Frontend evaluated correctness: 🎉', correctnessScore);
 
     if (correctnessScore > CONFIG.correctnessThreshold) {
-      apiEvalStudentAttempt({questionId: question.id, output: outputValue});
+      apiEvalStudentAttempt({questionId, output: outputValue});
     }
   }
 
@@ -269,10 +201,10 @@ define([
           try {
             callback(codeCell);
           } catch (error) {
-            console.error('[JupyterClass]', error);
+            logger.error(error);
           }
         } else {
-          console.log('msg_type', msg.msg_type);
+          logger.log('msg_type', msg.msg_type);
         }
         return prev_reply_callback(msg);
       };
@@ -283,3 +215,76 @@ define([
   return {load_ipython_extension};
 
 });
+
+const HELPERS = {
+
+  similarity(s1, s2) {
+  let longer = s1;
+  let shorter = s2;
+  if (s1.length < s2.length) {
+    longer = s2;
+    shorter = s1;
+  }
+  let longerLength = longer.length;
+  if (longerLength === 0) {
+    return 1.0;
+  }
+  return (longerLength - this.editDistance(longer, shorter)) / parseFloat(longerLength);
+},
+
+  editDistance(s1, s2) {
+    s1 = s1.toLowerCase();
+    s2 = s2.toLowerCase();
+
+    let costs = [];
+
+    for (let i = 0; i <= s1.length; i++) {
+      let lastValue = i;
+      for (let j = 0; j <= s2.length; j++) {
+        if (i === 0) {
+          costs[j] = j;
+        } else {
+          if (j > 0) {
+            let newValue = costs[j - 1];
+            if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
+              newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
+            }
+            costs[j - 1] = lastValue;
+            lastValue = newValue;
+          }
+        }
+      }
+      if (i > 0) {
+        costs[s2.length] = lastValue;
+      }
+    }
+    return costs[s2.length];
+  },
+
+  postData(url = '', data = {}) {
+    // Default options are marked with *
+    return fetch(url, {
+      method: 'POST', // *GET, POST, PUT, DELETE, etc.
+      mode: 'cors', // no-cors, cors, *same-origin
+      cache: 'no-cache', // *default, no-cache, reload, force-cache, only-if-cached
+      credentials: 'same-origin', // include, *same-origin, omit
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      redirect: 'follow', // manual, *follow, error
+      referrer: 'no-referrer', // no-referrer, *client
+      body: JSON.stringify(data), // body data type must match "Content-Type" header
+    })
+      .then(response => response.json()); // parses JSON response into native JavaScript objects
+  },
+
+};
+
+const logger = {
+  log(...args) {
+    console.log('[🚀 JupyterClass]', ...args);
+  },
+  error(message, ...args) {
+    console.error('[🚀 JupyterClass / ERROR] ' + message, ...args);
+  }
+};
