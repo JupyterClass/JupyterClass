@@ -9,6 +9,14 @@ define([
   Jupyter,
 ) {
 
+  function joinSession({ studentId, practiceId, secret }) {
+    HELPERS.postData(joinSessionEndpoint, { studentId, practiceId, secret })
+      .then(data => {
+        // TODO: Show success notification
+        logger.log(data);
+      })
+  }
+
   logger.log('Injecting JupyterClass code...');
 
   let studentId = Jupyter.notebook.metadata.JupyterClass.studentId;
@@ -20,11 +28,7 @@ define([
 
   if (studentId && practiceId && serverUrl && token) {
     logger.log('All session metadata present. Attempting connection to JupyterClass server...');
-    HELPERS.postData(joinSessionEndpoint, {studentId, practiceId, secret: token})
-      .then(data => {
-        // TODO: Show success notification
-        logger.log(data);
-      })
+    joinSession({studentId, practiceId, secret: token});
   }
 
   logger.log('Initialised with metadata:', { studentId, practiceId, serverUrl, token });
@@ -91,11 +95,7 @@ define([
       studentId = studentName;
       Jupyter.notebook.metadata.JupyterClass.studentId = studentName;
 
-      HELPERS.postData(joinSessionEndpoint, { studentId, secret })
-        .then(data => {
-          // TODO: Show success notification
-          logger.log(data);
-        })
+      joinSession({ studentId, practiceId, secret });
     };
 
     let action = {
@@ -158,7 +158,7 @@ define([
     let output, outputType, outputValue;
     let correctnessScore;
 
-    if (codeCell.output_area.outputs.length == 0) {
+    if (codeCell.output_area.outputs.length === 0) {
       return false;
     }
 
@@ -169,9 +169,9 @@ define([
     output = codeCell.output_area.outputs[0];
     outputType = output.output_type;
 
-    if (outputType == 'execute_result' || outputType == 'display_data') {
+    if (outputType === 'execute_result' || outputType === 'display_data') {
       outputValue = output.data['text/plain'];
-    } else if (outputType == 'stream') {
+    } else if (outputType === 'stream') {
       outputValue = output.text;
     }
 
