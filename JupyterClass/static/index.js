@@ -58,6 +58,10 @@ define([
       document.getElementById('jc-modal').style.display = 'flex'; // default is 'none'
     };
 
+    let closeModal = function () {
+      document.getElementById('jc-modal').style.display = 'none';
+    };
+
     const modal = `
       <div id="jc-modal" style="display: none; position: fixed; top: 0; bottom: 0; left: 0; right: 0; height: 100%; width: 100%; background-color: rgba(0,0,0,0.7); z-index: 100; justify-content: center; align-items: center;" class="">
         <div style="position: relative;">
@@ -72,8 +76,8 @@ define([
               SUBMIT
             </button>
           </div>
-          <span style="position: absolute; top: 5px; right: 5px; cursor: pointer;" 
-                onclick="document.getElementById('jc-modal').style.display = 'none';">
+          <span id="jc-close-modal"
+                style="position: absolute; top: 5px; right: 5px; cursor: pointer;">
             X
           </span>
         </div>
@@ -84,11 +88,14 @@ define([
 
     const studentNameInput = document.getElementById('jc-student-name');
     const secretInput = document.getElementById('jc-secret');
+    const closeModalButton = document.getElementById('jc-close-modal');
+    const submitButton = document.getElementById('jc-submit');
 
     // Prevent key presses from calling jupyter notebook's keyboard shortcuts
     studentNameInput.onkeydown = function (e) { e.stopPropagation(); };
     secretInput.onkeydown = function (e) { e.stopPropagation(); };
-    document.getElementById('jc-submit').onclick = function (e) {
+    closeModalButton.onclick = closeModal;
+    submitButton.onclick = function (e) {
       const studentName = studentNameInput.value;
       const secret = secretInput.value;
 
@@ -96,6 +103,7 @@ define([
       Jupyter.notebook.metadata.JupyterClass.studentId = studentName;
 
       joinSession({ studentId, practiceId, secret });
+      closeModal();
     };
 
     let action = {
