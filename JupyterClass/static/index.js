@@ -9,29 +9,40 @@ define([
   Jupyter,
 ) {
 
-  function joinSession({ studentId, practiceId, secret }) {
-    HELPERS.postData(joinSessionEndpoint, { studentId, practiceId, secret })
-      .then(data => {
-        // TODO: Show success notification
-        logger.log(data);
-      })
-  }
-
-  logger.log('Injecting JupyterClass code...');
-
   let studentId = Jupyter.notebook.metadata.JupyterClass.studentId;
-  let practiceId = Jupyter.notebook.notebook_name;
+  let practiceId = Jupyter.notebook.metadata.JupyterClass.practiceId || Jupyter.notebook.notebook_name.replace('.ipynb', '');
   let serverUrl = Jupyter.notebook.metadata.JupyterClass.server;
-  let token = Jupyter.notebook.metadata.JupyterClass.token;
+  let sessionPwd = Jupyter.notebook.metadata.JupyterClass.sessionPwd;
+  let expiry = Jupyter.notebook.metadata.JupyterClass.expiry;
   let joinSessionEndpoint = serverUrl + '/api/join';
+  let rejoinSessionEndpoint = serverUrl + '/api/rejoin';
   let studentAttemptEvalEndpoint = serverUrl + '/api/evaluate';
 
-  if (studentId && practiceId && serverUrl && token) {
-    logger.log('All session metadata present. Attempting connection to JupyterClass server...');
-    joinSession({studentId, practiceId, secret: token});
+  function joinSession({ studentId, practiceId, sessionPwd }) {
+    return HELPERS.postData(joinSessionEndpoint, { studentId, practiceId, sessionPwd })
   }
 
-  logger.log('Initialised with metadata:', { studentId, practiceId, serverUrl, token });
+  function rejoinSession() {
+    return HELPERS.postData(
+      rejoinSessionEndpoint,
+      { studentId, practiceId, sessionPwd },
+      { authorization: 'bearer ' + AUTH.getTokenFromPersistentStorage() });
+  }
+
+  function handleSubmit(name) {
+    studentId = name;
+    Jupyter.notebook.metadata.JupyterClass.studentId = name;
+    joinSession({ studentId, practiceId, sessionPwd })
+      .then(response => {
+        if (response.status === 'success') {
+          Notification.showJoinSessionSuccess();
+          AUTH.saveTokenInPersistentStorage(response.token);
+          patchCodecellsWithJupyterClass();
+        } else {
+          Notification.showDuplicateNameError();
+        }
+      });
+  }
 
   function load_ipython_extension() {
     if (!practiceId) {
@@ -39,16 +50,74 @@ define([
       return;
     }
 
-    addJupyterClassButtonToToolbar();
+    logger.log('Initialised with metadata:', { studentId, practiceId, serverUrl  });
 
-    // Attach callback to all Practice Question code cells
+    // Optional expiry field. If it's set, check that it's valid.
+    if (expiry) {
+      const { valid, reason, timestamp } = HELPERS.parseExpiry(expiry);
+      if (valid) {
+        logger.log('Replacing `expiry` with converted timestamp');
+        expiry = timestamp;
+        if (expiry < Date.now()) {
+          AUTH.deleteTokenFromPersistentStorage();
+          return;
+        }
+      } else {
+        logger.error(reason);
+        logger.log('Aborting setup due to malformed expiry field');
+        return;
+      }
+    }
+
+    if (studentId && practiceId && serverUrl && sessionPwd) {
+      logger.log('All session metadata present. Attempting connection to JupyterClass server...');
+
+      // addJupyterClassButtonToToolbar();
+      logger.log(0);
+      getPracticeStatus(practiceId)
+        .then(response => {
+          logger.log(1);
+          if (response.status === 'live') {
+            logger.log(2);
+            if (AUTH.getTokenFromPersistentStorage()) {
+              rejoinSession()
+                .then(response => {
+                  logger.log('REJOIN RESPONSE:', response)
+                  if (response.status === 'success') {
+                    patchCodecellsWithJupyterClass();
+                    Notification.showJoinSessionSuccess();
+                  } else {
+                    Notification.showJoinSessionForm();
+                  }
+                });
+            } else {
+              Notification.showJoinSessionForm();
+            }
+          } else if (response.status === 'error') {
+            logger.log('Status is error', response);
+            // Unauthorized
+            Notification.showJoinSessionForm();
+          } else {
+            logger.log("Practice isn't live. Aborting code injection.");
+          }
+        })
+    }
+  }
+
+  function patchCodecellsWithJupyterClass() {
     let questionCells = getQuestionCells();
-
     questionCells.forEach(questionCell => {
       patch_CodeCell_get_callbacks(questionCell, postRunCellCallback);
     });
-
     logger.log("Initialised - Practice ID: " + practiceId + "...");
+  }
+
+  function getPracticeStatus(practiceId) {
+    return HELPERS.apiGet(
+      serverUrl + `/api/practice/${practiceId}`,
+      {
+        authorization: 'bearer ' + AUTH.getTokenFromPersistentStorage()
+      });
   }
 
   function addJupyterClassButtonToToolbar() {
@@ -70,8 +139,7 @@ define([
               JupyterClass
             </h1>
             <code>Author: @elihuansen</code>
-            <input id="jc-student-name" style="margin: 16px 0 8px 0" class="form-control" placeholder="Student Full Name" value="${studentId || ''}">
-            <input id="jc-secret" class="form-control" placeholder="Lesson Password">
+            <input id="jc-student-name" style="margin: 16px 0 8px 0" class="form-control" placeholder="Student Full Name">
             <button id="jc-submit" class="btn btn-primary" style="width: 100%; margin-top: auto;">
               SUBMIT
             </button>
@@ -87,23 +155,26 @@ define([
     body.insertAdjacentHTML('beforeend', modal);
 
     const studentNameInput = document.getElementById('jc-student-name');
-    const secretInput = document.getElementById('jc-secret');
     const closeModalButton = document.getElementById('jc-close-modal');
     const submitButton = document.getElementById('jc-submit');
 
+    studentNameInput.setAttribute('value', studentId);
+
     // Prevent key presses from calling jupyter notebook's keyboard shortcuts
     studentNameInput.onkeydown = function (e) { e.stopPropagation(); };
-    secretInput.onkeydown = function (e) { e.stopPropagation(); };
     closeModalButton.onclick = closeModal;
     submitButton.onclick = function (e) {
       const studentName = studentNameInput.value;
-      const secret = secretInput.value;
 
       studentId = studentName;
       Jupyter.notebook.metadata.JupyterClass.studentId = studentName;
 
-      joinSession({ studentId, practiceId, secret });
-      closeModal();
+      joinSession({ studentId, practiceId, sessionPwd })
+        .then(isSuccessful => {
+          if (isSuccessful) {
+            closeModal();
+          }
+        })
     };
 
     let action = {
@@ -121,15 +192,20 @@ define([
 
   function apiEvalStudentAttempt({questionId, output}) {
     const endpoint = studentAttemptEvalEndpoint;
-
     const requestBody = {studentId, practiceId, questionId, output};
 
-    logger.log(requestBody);
-    HELPERS.postData(endpoint, requestBody)
-      .then(logger.log)
-      .catch(err => {
-        logger.error(err);
-      });
+    let shouldSend = true;
+    if (expiry) {
+      shouldSend = Date.now() < expiry;
+    }
+
+    if (shouldSend) {
+      HELPERS.postData(endpoint, requestBody, { authorization: 'bearer ' + AUTH.getTokenFromPersistentStorage() })
+        .then(logger.log)
+        .catch(err => {
+          logger.error(err);
+        });
+    }
   }
 
   function getCorrectnessScore(expectedOutput, actualOutput) {
@@ -183,12 +259,10 @@ define([
       outputValue = output.text;
     }
 
-    logger.log('🐞', output);
-
     outputValue = cleanCellOutput(outputValue);
 
     correctnessScore = getCorrectnessScore(expectedOutput, outputValue);
-    logger.log('Frontend evaluated correctness: 🎉', correctnessScore);
+    // logger.log('Frontend evaluated correctness: 🎉', correctnessScore);
 
     if (correctnessScore > CONFIG.correctnessThreshold) {
       apiEvalStudentAttempt({questionId, output: outputValue});
@@ -218,6 +292,116 @@ define([
       };
       return callbacks;
     };
+  }
+
+  const AUTH = {
+    key: 'JC_auth_' + practiceId + '_tkn',
+
+    saveTokenInPersistentStorage(token) {
+      window.localStorage[this.key] = token;
+      logger.log('Saved token to local storage');
+    },
+    getTokenFromPersistentStorage() {
+      return window.localStorage[this.key];
+    },
+    deleteTokenFromPersistentStorage() {
+      delete window.localStorage[this.key];
+    }
+  }
+
+  const Notification = {
+
+    container: `
+    <div id="jc-notif" style="
+      position: fixed; 
+      top: 20px; 
+      right: 0; 
+      background: #FFFFFF;
+      padding: 16px; 
+      box-shadow: -2px 2px 6px 1px rgba(0,0,0,0.2);
+      border-radius: 4px;
+      min-height: 80px;
+      min-width: 200px;
+      transition: all 0.25s;
+      transform: translateX(100%);
+      z-index: 1000;
+    "></div>
+  `,
+    element: document.getElementById('jc-notif'),
+    title: null,
+    content: null,
+
+    render() {
+      const innerHTML = `
+      <h1 id="jc-notif-title">${this.title}</h1>
+      <div id="jc-content">
+        ${this.content}
+      </div>
+    `;
+
+      if (!this.element) {
+        const body = document.getElementsByTagName('body')[0];
+        body.insertAdjacentHTML('beforeend', this.container);
+      }
+      this.element = document.getElementById('jc-notif');
+      this.element.innerHTML = innerHTML;
+    },
+
+    showDuplicateNameError() {
+      this.title = 'Please try another name';
+      this.content = JoinSessionForm.html;
+      this.show();
+      JoinSessionForm.registerEventListeners();
+    },
+
+    showJoinSessionSuccess() {
+      this.title = 'Joined session successfully!';
+      this.content = '';
+      this.show(3000);
+    },
+
+    showJoinSessionForm() {
+      this.title = 'Please join the session';
+      this.content = JoinSessionForm.html;
+      this.show();
+      JoinSessionForm.registerEventListeners();
+    },
+
+    show(hideAfter) {
+      this.render();
+      setTimeout(() => {
+        this.element.style.transform = 'translateX(0)';
+        if (hideAfter) {
+          setTimeout(() => {
+            this.hide();
+          }, hideAfter);
+        }
+      }, 100);
+    },
+
+    hide() {
+      this.element.style.transform = 'translateX(100%)';
+    }
+  }
+
+  const JoinSessionForm = {
+    html: `
+    <div>
+      <input id="jc-notif-student-name" style="margin: 16px 0 8px 0" class="form-control" placeholder="Student Full Name">
+      <button id="jc-notif-submit" class="btn btn-primary" style="width: 100%; margin-top: auto;">
+        SUBMIT
+      </button>
+    </div>
+  `,
+
+    registerEventListeners() {
+      const studentNameInput = document.getElementById('jc-notif-student-name');
+      const submitBtn = document.getElementById('jc-notif-submit');
+      studentNameInput.onkeydown = function (e) { e.stopPropagation(); };
+      submitBtn.onclick = function() {
+        handleSubmit(studentNameInput.value);
+      }
+    }
   }
 
   return {load_ipython_extension};
@@ -269,7 +453,7 @@ const HELPERS = {
     return costs[s2.length];
   },
 
-  postData(url = '', data = {}) {
+  postData(url = '', data = {}, headers = {}) {
     // Default options are marked with *
     return fetch(url, {
       method: 'POST', // *GET, POST, PUT, DELETE, etc.
@@ -278,6 +462,7 @@ const HELPERS = {
       credentials: 'same-origin', // include, *same-origin, omit
       headers: {
         'Content-Type': 'application/json',
+        ...headers,
       },
       redirect: 'follow', // manual, *follow, error
       referrer: 'no-referrer', // no-referrer, *client
@@ -286,6 +471,26 @@ const HELPERS = {
       .then(response => response.json()); // parses JSON response into native JavaScript objects
   },
 
+  apiGet(url= '', headers = {}) {
+    return fetch(url, { headers }).then(response => response.json());
+  },
+
+  parseExpiry(timestamp) {
+    let valid, reason;
+    if (!timestamp) {
+      valid = false;
+      reason = 'Timestamp provided was falsey';
+    } else if (isNaN(timestamp)) {
+      timestamp = Number(new Date(timestamp));
+      if (isNaN(timestamp)) {
+        valid = false;
+        reason = 'Timestamp provided could not be converted into a valid unix timestamp';
+      }
+    }
+    valid = timestamp > Date.now();
+    reason = valid ? 'Timestamp parsed successfully' : 'Timestamp cannot be before current time';
+    return { valid, reason, timestamp };
+  }
 };
 
 const logger = {
