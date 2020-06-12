@@ -1,13 +1,13 @@
-const CONFIG = {
-  // If question output is deemed to be at least 50% "correct"
-  correctnessThreshold: 0.5
-};
-
 define([
   'base/js/namespace'
 ], function (
   Jupyter,
 ) {
+
+  const CONFIG = {
+    // If question output is deemed to be at least 50% "correct"
+    correctnessThreshold: 0.5
+  };
 
   let studentId = Jupyter.notebook.metadata.JupyterClass.studentId;
   let practiceId = Jupyter.notebook.metadata.JupyterClass.practiceId || Jupyter.notebook.notebook_name.replace('.ipynb', '');
@@ -31,7 +31,7 @@ define([
 
   function handleSubmit(name) {
     studentId = name;
-    Jupyter.notebook.metadata.JupyterClass.studentId = name;
+    // Jupyter.notebook.metadata.JupyterClass.studentId = name;
     joinSession({ studentId, practiceId, sessionPwd })
       .then(response => {
         if (response.status === 'success') {
@@ -69,7 +69,7 @@ define([
       }
     }
 
-    if (studentId && practiceId && serverUrl && sessionPwd) {
+    if (practiceId && serverUrl && sessionPwd) {
       logger.log('All session metadata present. Attempting connection to JupyterClass server...');
 
       // addJupyterClassButtonToToolbar();
@@ -114,7 +114,7 @@ define([
 
   function getPracticeStatus(practiceId) {
     return HELPERS.apiGet(
-      serverUrl + `/api/practice/${practiceId}`,
+      serverUrl + `/api/practice/status?id=${practiceId}`,
       {
         authorization: 'bearer ' + AUTH.getTokenFromPersistentStorage()
       });
@@ -167,7 +167,7 @@ define([
       const studentName = studentNameInput.value;
 
       studentId = studentName;
-      Jupyter.notebook.metadata.JupyterClass.studentId = studentName;
+      // Jupyter.notebook.metadata.JupyterClass.studentId = studentName;
 
       joinSession({ studentId, practiceId, sessionPwd })
         .then(isSuccessful => {
@@ -192,7 +192,7 @@ define([
 
   function apiEvalStudentAttempt({questionId, output}) {
     const endpoint = studentAttemptEvalEndpoint;
-    const requestBody = {studentId, practiceId, questionId, output};
+    const requestBody = {practiceId, questionId, output};
 
     let shouldSend = true;
     if (expiry) {
@@ -295,7 +295,7 @@ define([
   }
 
   const AUTH = {
-    key: 'JC_auth_' + practiceId + '_tkn',
+    key: 'JC_auth_tkn',
 
     saveTokenInPersistentStorage(token) {
       window.localStorage[this.key] = token;
@@ -404,100 +404,100 @@ define([
     }
   }
 
+  const HELPERS = {
+
+    similarity(s1, s2) {
+      let longer = s1;
+      let shorter = s2;
+      if (s1.length < s2.length) {
+        longer = s2;
+        shorter = s1;
+      }
+      let longerLength = longer.length;
+      if (longerLength === 0) {
+        return 1.0;
+      }
+      return (longerLength - this.editDistance(longer, shorter)) / parseFloat(longerLength);
+    },
+
+    editDistance(s1, s2) {
+      s1 = s1.toLowerCase();
+      s2 = s2.toLowerCase();
+
+      let costs = [];
+
+      for (let i = 0; i <= s1.length; i++) {
+        let lastValue = i;
+        for (let j = 0; j <= s2.length; j++) {
+          if (i === 0) {
+            costs[j] = j;
+          } else {
+            if (j > 0) {
+              let newValue = costs[j - 1];
+              if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
+                newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
+              }
+              costs[j - 1] = lastValue;
+              lastValue = newValue;
+            }
+          }
+        }
+        if (i > 0) {
+          costs[s2.length] = lastValue;
+        }
+      }
+      return costs[s2.length];
+    },
+
+    postData(url = '', data = {}, headers = {}) {
+      // Default options are marked with *
+      return fetch(url, {
+        method: 'POST', // *GET, POST, PUT, DELETE, etc.
+        mode: 'cors', // no-cors, cors, *same-origin
+        cache: 'no-cache', // *default, no-cache, reload, force-cache, only-if-cached
+        credentials: 'same-origin', // include, *same-origin, omit
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers,
+        },
+        redirect: 'follow', // manual, *follow, error
+        referrer: 'no-referrer', // no-referrer, *client
+        body: JSON.stringify(data), // body data type must match "Content-Type" header
+      })
+        .then(response => response.json()); // parses JSON response into native JavaScript objects
+    },
+
+    apiGet(url= '', headers = {}) {
+      return fetch(url, { headers }).then(response => response.json());
+    },
+
+    parseExpiry(timestamp) {
+      let valid, reason;
+      if (!timestamp) {
+        valid = false;
+        reason = 'Timestamp provided was falsey';
+      } else if (isNaN(timestamp)) {
+        timestamp = Number(new Date(timestamp));
+        if (isNaN(timestamp)) {
+          valid = false;
+          reason = 'Timestamp provided could not be converted into a valid unix timestamp';
+        }
+      }
+      valid = timestamp > Date.now();
+      reason = valid ? 'Timestamp parsed successfully' : 'Timestamp cannot be before current time';
+      return { valid, reason, timestamp };
+    }
+  };
+
+  const logger = {
+    log(...args) {
+      console.log('[🚀 JupyterClass]', ...args);
+    },
+    error(message, ...args) {
+      console.error('[🚀 JupyterClass / ERROR] ' + message, ...args);
+    }
+  };
+
   return {load_ipython_extension};
 
 });
-
-const HELPERS = {
-
-  similarity(s1, s2) {
-  let longer = s1;
-  let shorter = s2;
-  if (s1.length < s2.length) {
-    longer = s2;
-    shorter = s1;
-  }
-  let longerLength = longer.length;
-  if (longerLength === 0) {
-    return 1.0;
-  }
-  return (longerLength - this.editDistance(longer, shorter)) / parseFloat(longerLength);
-},
-
-  editDistance(s1, s2) {
-    s1 = s1.toLowerCase();
-    s2 = s2.toLowerCase();
-
-    let costs = [];
-
-    for (let i = 0; i <= s1.length; i++) {
-      let lastValue = i;
-      for (let j = 0; j <= s2.length; j++) {
-        if (i === 0) {
-          costs[j] = j;
-        } else {
-          if (j > 0) {
-            let newValue = costs[j - 1];
-            if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
-              newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
-            }
-            costs[j - 1] = lastValue;
-            lastValue = newValue;
-          }
-        }
-      }
-      if (i > 0) {
-        costs[s2.length] = lastValue;
-      }
-    }
-    return costs[s2.length];
-  },
-
-  postData(url = '', data = {}, headers = {}) {
-    // Default options are marked with *
-    return fetch(url, {
-      method: 'POST', // *GET, POST, PUT, DELETE, etc.
-      mode: 'cors', // no-cors, cors, *same-origin
-      cache: 'no-cache', // *default, no-cache, reload, force-cache, only-if-cached
-      credentials: 'same-origin', // include, *same-origin, omit
-      headers: {
-        'Content-Type': 'application/json',
-        ...headers,
-      },
-      redirect: 'follow', // manual, *follow, error
-      referrer: 'no-referrer', // no-referrer, *client
-      body: JSON.stringify(data), // body data type must match "Content-Type" header
-    })
-      .then(response => response.json()); // parses JSON response into native JavaScript objects
-  },
-
-  apiGet(url= '', headers = {}) {
-    return fetch(url, { headers }).then(response => response.json());
-  },
-
-  parseExpiry(timestamp) {
-    let valid, reason;
-    if (!timestamp) {
-      valid = false;
-      reason = 'Timestamp provided was falsey';
-    } else if (isNaN(timestamp)) {
-      timestamp = Number(new Date(timestamp));
-      if (isNaN(timestamp)) {
-        valid = false;
-        reason = 'Timestamp provided could not be converted into a valid unix timestamp';
-      }
-    }
-    valid = timestamp > Date.now();
-    reason = valid ? 'Timestamp parsed successfully' : 'Timestamp cannot be before current time';
-    return { valid, reason, timestamp };
-  }
-};
-
-const logger = {
-  log(...args) {
-    console.log('[🚀 JupyterClass]', ...args);
-  },
-  error(message, ...args) {
-    console.error('[🚀 JupyterClass / ERROR] ' + message, ...args);
-  }
-};
